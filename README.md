@@ -23,14 +23,14 @@ What works and what does not, measured against [RULES.md](RULES.md).
 | Area | State |
 | --- | --- |
 | Board model (`models.py`) | Pieces, walls, upgrade squares, bounds and duplicate checks. Uses Pydantic v1 style validators, which warn under Pydantic 2. |
-| Move generation (`ai_base.py`) | Pawn single step in four cardinal directions and diagonal capture; sliding pieces stopped by walls; knight; king single step. Missing: pawn two square first move, promotion on upgrade squares, castling. |
-| Move validation (`AIEngine.validate_move`) | Implements standard chess pawn rules, which contradict the variant. Not exposed by any endpoint. |
+| Move generation (`ai_base.py`) | Works: every piece rule in RULES.md, pawn two square first move, promotion on upgrade squares, walls, and the king safety filter. Not done: castling. |
+| Move validation (`AIEngine.validate_move`) | Delegates to the move generator, so validation and generation cannot disagree. Not exposed by any endpoint. |
 | `greedy` | Picks the highest material capture. Works. |
-| `smart2` | One ply heuristic evaluation. Works but shallow. |
-| `smart_fast` | Exists with its own tests but is not registered with the engine or accepted by the API. |
-| `random` | `ai_random.py` is empty. |
-| Search | No lookahead of any depth. |
-| Tests | `pytest` on a clean checkout: 2 failed, 2 passed. The failures reference a side (`BLACK`) that does not exist. Coverage of the variant rules is thin. |
+| `smart2` | One ply heuristic evaluation. Works but shallow. Default. |
+| `smart_fast` | One ply with threat maps. Registered. |
+| `random` | Uniform choice among legal moves. Registered. |
+| Search | No lookahead of any depth. This is the open goal. |
+| Tests | `pytest` on a clean checkout: 38 passed. `test_variant_rules.py` covers every rule above; `test_main.py` covers the HTTP endpoints with FastAPI's TestClient. |
 
 ## Layout
 
@@ -38,13 +38,15 @@ What works and what does not, measured against [RULES.md](RULES.md).
 main.py             FastAPI app: /health, /api/v1/ai/types, /api/v1/ai/move
 models.py           Pydantic models: BoardState, Piece, Wall, UpgradeSquare, Move, MoveRequest, MoveResponse
 ai_engine.py        AIEngine: routes ai_type to an AI class, converts results, validate_move
-ai_base.py          AIBase: occupancy registry, move generation per piece type, material scoring
+ai_base.py          AIBase: occupancy registry, move generation per piece type, king safety filter, move simulation, material scoring
 ai_greedy.py        AiGreedy
 ai_smart2.py        AiSmart2 (default)
-ai_smart_fast.py    AiSmartFast (not registered)
-ai_random.py        empty
+ai_smart_fast.py    AiSmartFast
+ai_random.py        AiRandom
 test_ai.py          engine and board validation tests
-test_smart_fast.py  AiSmartFast tests (currently failing)
+test_variant_rules.py  rule by rule coverage of RULES.md, validate_move, AI registration
+test_main.py        HTTP endpoints via TestClient
+test_smart_fast.py  AiSmartFast tests
 test_api_server.py  integration check against a running server; excluded from pytest
 RULES.md            the variant rules this service must implement
 ```
