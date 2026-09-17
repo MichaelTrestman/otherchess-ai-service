@@ -13,6 +13,14 @@ class AiMinimax(AIBase):
     ply is treated as a *minimising* ply (all opponents cooperate to
     hurt the root player).  This keeps the classic alpha-beta mechanics
     intact.
+
+    Ply convention:
+        * ``current_depth`` counts plies from the root (0 = root position).
+        * The side to move at each ply is determined by
+          ``_side_to_move_at_depth``, which cycles through the sides
+          actually present on the board.  It is **not** derived from
+          parity (even/odd), so the engine correctly handles games
+          with more than two sides or sides eliminated mid-search.
     """
 
     # Large finite mate score, scaled by depth so faster wins score higher.
@@ -39,6 +47,7 @@ class AiMinimax(AIBase):
             time_budget_s if time_budget_s is not None else self.DEFAULT_TIME_BUDGET_S
         )
         self._cutoff_time: Optional[float] = None
+        self._last_depth_reached: int = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -52,6 +61,7 @@ class AiMinimax(AIBase):
 
         # Start the clock.
         self._cutoff_time = time.monotonic() + self.time_budget_s
+        self._last_depth_reached = 0
 
         best_move: Optional[Tuple[Piece, Dict[str, Any]]] = None
         best_score = -float("inf")
@@ -92,6 +102,7 @@ class AiMinimax(AIBase):
             if iteration_best is not None and not self._out_of_time():
                 best_move = iteration_best
                 best_score = iteration_score
+                self._last_depth_reached = depth
 
         # Fallback: if we never finished a single iteration, just use the
         # first legal move (should never happen on reasonable boards).

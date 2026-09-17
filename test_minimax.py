@@ -85,7 +85,7 @@ def test_minimax_finds_two_ply_material_win():
 
 
 def test_minimax_respects_time_budget():
-    """Minimax returns within roughly twice a 200 ms budget."""
+    """Minimax returns within roughly twice a 200 ms budget and deepens past depth 1."""
     pieces = [
         Piece(id="w_pawn", type=PieceType.PAWN, side=Side.WHITE, posx=3, posy=6, has_moved=False),
         Piece(id="w_king", type=PieceType.KING, side=Side.WHITE, posx=4, posy=7, has_moved=False),
@@ -100,6 +100,9 @@ def test_minimax_respects_time_budget():
     assert move_result is not None
     # Should return within roughly twice the budget (generous margin)
     assert elapsed < 0.5
+    # The search must have actually deepened past depth 1, otherwise a
+    # broken engine that returns immediately would pass.
+    assert ai._last_depth_reached > 1
 
 
 def test_minimax_king_capture_no_500():
