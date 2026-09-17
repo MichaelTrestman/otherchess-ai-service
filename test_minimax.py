@@ -78,8 +78,8 @@ def test_minimax_finds_two_ply_material_win():
     move_result = ai.select_move()
     assert move_result is not None
     piece, move = move_result
-    # Minimax must NOT make the rook capture — it loses the rook next turn
-    assert not (piece.type == PieceType.ROOK and move["posx"] == 0 and move["posy"] == 1)
+    # The selected move must NOT be the rook capturing the pawn (unconditional)
+    assert (piece.id, move["posx"], move["posy"]) != ("w_rook", 0, 1)
     # And it must pick a different move than smart2
     assert (piece.id, move["posx"], move["posy"]) != (s_piece.id, s_move["posx"], s_move["posy"])
 
