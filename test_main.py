@@ -19,7 +19,7 @@ def test_ai_types():
     response = client.get("/api/v1/ai/types")
     assert response.status_code == 200
     data = response.json()
-    assert set(data["ai_types"]) == {"smart2", "greedy", "smart_fast", "random"}
+    assert set(data["ai_types"]) == {"smart2", "greedy", "smart_fast", "random", "minimax"}
     assert data["default"] == "smart2"
 
 
