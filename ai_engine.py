@@ -5,6 +5,7 @@ from ai_smart2 import AiSmart2
 from ai_greedy import AiGreedy
 from ai_smart_fast import AiSmartFast
 from ai_random import AiRandom
+from ai_minimax import AiMinimax
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,8 @@ class AIEngine:
             "smart2": AiSmart2,
             "greedy": AiGreedy,
             "smart_fast": AiSmartFast,
-            "random": AiRandom
+            "random": AiRandom,
+            "minimax": AiMinimax
         }
         logger.info("AI Engine initialized with AI types: %s", list(self.ai_types.keys()))
     

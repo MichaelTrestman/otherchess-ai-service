@@ -37,7 +37,7 @@ def make_board(pieces, width=8, height=8, walls=None, upgrade_squares=None):
 
 def test_all_ai_types_registered(engine):
     types = engine.get_available_ai_types()
-    assert set(types) == {"smart2", "greedy", "smart_fast", "random"}
+    assert set(types) == {"smart2", "greedy", "smart_fast", "random", "minimax"}
 
 
 def test_smart_fast_calculates_move(engine):
