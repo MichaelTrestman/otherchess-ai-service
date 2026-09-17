@@ -55,6 +55,7 @@ class AIBase:
         """
         Get all possible moves for the current side.
         Uses the Ruby logic from assemble_possible_moves.
+        Filters out moves that leave the king capturable.
         """
         all_moves = []
         current_turn_pieces = [p for p in self.board_state.pieces if p.side == self.side]
@@ -64,7 +65,128 @@ class AIBase:
             for move in piece_moves:
                 all_moves.append((piece, move))
         
-        return all_moves
+        # Filter out moves that leave the king capturable (king safety)
+        safe_moves = []
+        for piece, move in all_moves:
+            if self._is_move_safe_for_king(piece, move):
+                safe_moves.append((piece, move))
+        
+        return safe_moves
+    
+    def _is_move_safe_for_king(self, piece: Piece, move: Dict[str, Any]) -> bool:
+        """Check if a move does not leave the king capturable by opponents."""
+        # Find the king
+        king = None
+        for p in self.board_state.pieces:
+            if p.side == self.side and p.type == PieceType.KING:
+                king = p
+                break
+        
+        # If no king, all moves are safe (king can be captured, side is out)
+        if not king:
+            return True
+        
+        # Simulate the move to get the board state after the move
+        sim_state = self._simulate_move(piece, move)
+        
+        # Determine king position after the move
+        king_posx = king.posx
+        king_posy = king.posy
+        if piece.id == king.id:
+            # King is moving - find it in simulated state
+            for p in sim_state.pieces:
+                if p.id == king.id:
+                    king_posx = p.posx
+                    king_posy = p.posy
+                    break
+        
+        # Check if any opponent piece can capture the king in the simulated state
+        for opponent in sim_state.pieces:
+            if opponent.side == self.side:
+                continue
+            
+            # Check if opponent can move to king position on simulated board
+            if self._can_piece_reach_on_board(opponent, king_posx, king_posy, sim_state):
+                return False
+        
+        return True
+    
+    def _can_piece_reach_on_board(self, piece: Piece, target_x: int, target_y: int, board: BoardState) -> bool:
+        """Check if a piece can move to a specific square in one move on a given board state."""
+        piece_type = piece.type.value if hasattr(piece.type, 'value') else piece.type
+        
+        dx = target_x - piece.posx
+        dy = target_y - piece.posy
+        adx = abs(dx)
+        ady = abs(dy)
+        
+        if piece_type == 'pawn':
+            # Pawn captures diagonally one square
+            if adx == 1 and ady == 1:
+                # Check if target has an enemy piece
+                target_piece = board.get_piece_at(target_x, target_y)
+                return target_piece is not None and target_piece.side != piece.side
+            return False
+        
+        elif piece_type == 'knight':
+            if (adx == 2 and ady == 1) or (adx == 1 and ady == 2):
+                # Cannot land on wall or friendly piece
+                target_piece = board.get_piece_at(target_x, target_y)
+                if target_piece and target_piece.side == piece.side:
+                    return False
+                for w in board.walls:
+                    if w.posx == target_x and w.posy == target_y:
+                        return False
+                return True
+            return False
+        
+        elif piece_type == 'king':
+            if adx <= 1 and ady <= 1:
+                target_piece = board.get_piece_at(target_x, target_y)
+                if target_piece and target_piece.side == piece.side:
+                    return False
+                for w in board.walls:
+                    if w.posx == target_x and w.posy == target_y:
+                        return False
+                return True
+            return False
+        
+        elif piece_type == 'bishop':
+            if adx != ady:
+                return False
+            return self._is_path_clear_on_board(piece.posx, piece.posy, target_x, target_y, board)
+        
+        elif piece_type == 'rook':
+            if adx != 0 and ady != 0:
+                return False
+            return self._is_path_clear_on_board(piece.posx, piece.posy, target_x, target_y, board)
+        
+        elif piece_type == 'queen':
+            if adx != 0 and ady != 0 and adx != ady:
+                return False
+            return self._is_path_clear_on_board(piece.posx, piece.posy, target_x, target_y, board)
+        
+        return False
+    
+    def _is_path_clear_on_board(self, from_x: int, from_y: int, to_x: int, to_y: int, board: BoardState) -> bool:
+        """Check if path between two points is clear on a given board state.
+        Only intermediate squares must be empty; destination is checked separately by caller."""
+        step_x = 1 if to_x > from_x else -1 if to_x < from_x else 0
+        step_y = 1 if to_y > from_y else -1 if to_y < from_y else 0
+        
+        x, y = from_x + step_x, from_y + step_y
+        while x != to_x or y != to_y:
+            if board.is_square_occupied(x, y):
+                return False
+            x += step_x
+            y += step_y
+        
+        # Destination must not be a wall
+        for w in board.walls:
+            if w.posx == to_x and w.posy == to_y:
+                return False
+        
+        return True
     
     def _calculate_moves_for_piece(self, piece: Piece) -> List[Dict[str, Any]]:
         """
@@ -83,29 +205,68 @@ class AIBase:
             return []
     
     def _moves_for_pawn(self, piece: Piece) -> List[Dict[str, Any]]:
-        """Generate pawn moves using Ruby logic."""
+        """Generate pawn moves for the variant rules.
+        
+        Pawns have no direction:
+        - Step: one square in any cardinal direction onto empty square (non-capturing)
+        - Capture: one square in any diagonal direction onto enemy piece
+        - First move: two squares in one cardinal direction if both squares empty
+        - Promotion: pawn becomes queen when ending on upgrade square
+        """
         move_set = []
         
-        # First try cardinal directions (forward moves)
+        # Cardinal directions (step moves, non-capturing)
         for direction in self._cardinal_directions().values():
             result = self._try_once(piece, direction)
-            if result:
-                move_set.append(result)
+            if result and result.get('killed_piece') is None:
+                move_set.append(self._add_promotion(piece, result))
         
-        # Filter to only non-kill moves
-        no_kill_moves = [move for move in move_set if move.get('killed_piece') is None]
-        move_set = []
+        # Two-square first move in cardinal directions
+        if not piece.has_moved:
+            for direction in self._cardinal_directions().values():
+                result = self._try_pawn_double_step(piece, direction)
+                if result:
+                    move_set.append(self._add_promotion(piece, result))
         
-        # Then try diagonal directions (captures)
+        # Diagonal directions (captures only)
         for direction in self._diagonal_directions().values():
             result = self._try_once(piece, direction)
-            if result:
-                move_set.append(result)
+            if result and result.get('killed_piece') is not None:
+                move_set.append(self._add_promotion(piece, result))
         
-        # Filter to only kill moves
-        kill_moves = [move for move in move_set if move.get('killed_piece') is not None]
+        return move_set
+    
+    def _try_pawn_double_step(self, piece: Piece, direction: Dict[str, int]) -> Optional[Dict[str, Any]]:
+        """Try a two-square pawn move. Both squares must be empty."""
+        # First square
+        mid_space = {
+            'posx': piece.posx + direction['x'],
+            'posy': piece.posy + direction['y']
+        }
+        mid_result = self._space_available(piece, mid_space)
+        if not mid_result.get('movable') or mid_result.get('killed_piece'):
+            return None
         
-        return no_kill_moves + kill_moves
+        # Second square
+        end_space = {
+            'posx': piece.posx + 2 * direction['x'],
+            'posy': piece.posy + 2 * direction['y']
+        }
+        end_result = self._space_available(piece, end_space)
+        if not end_result.get('movable') or end_result.get('killed_piece'):
+            return None
+        
+        # Remove movable flag
+        del end_result['movable']
+        return end_result
+    
+    def _add_promotion(self, piece: Piece, move: Dict[str, Any]) -> Dict[str, Any]:
+        """Add promotion_type if move ends on upgrade square."""
+        for sq in self.board_state.upgrade_squares:
+            if sq.posx == move['posx'] and sq.posy == move['posy']:
+                move['promotion_type'] = PieceType.QUEEN
+                break
+        return move
     
     def _moves_for_bishop(self, piece: Piece) -> List[Dict[str, Any]]:
         """Generate bishop moves using Ruby logic."""
@@ -290,6 +451,33 @@ class AIBase:
         Legacy method for compatibility. Use _calculate_moves_for_piece instead.
         """
         return self._calculate_moves_for_piece(piece)
+    
+    def _simulate_move(self, piece: Piece, move: Dict[str, Any]) -> BoardState:
+        """Create a new board state after applying a move."""
+        from copy import deepcopy
+        new_state = deepcopy(self.board_state)
+        
+        # Find and move the piece
+        for p in new_state.pieces:
+            if p.id == piece.id:
+                p.posx = move['posx']
+                p.posy = move['posy']
+                p.has_moved = True
+                break
+        
+        # Remove killed piece
+        if move.get('killed_piece'):
+            killed_id = move['killed_piece']['id']
+            new_state.pieces = [p for p in new_state.pieces if p.id != killed_id]
+        
+        # Handle promotion
+        if move.get('promotion_type'):
+            for p in new_state.pieces:
+                if p.id == piece.id:
+                    p.type = move['promotion_type']
+                    break
+        
+        return new_state
     
     def _value_for_move(self, piece: Piece, move: Dict[str, Any]) -> int:
         """Calculate base material value for a move."""

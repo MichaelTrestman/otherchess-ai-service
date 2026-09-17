@@ -3,6 +3,8 @@ import logging
 from models import BoardState, Piece, Move, Side, PieceType
 from ai_smart2 import AiSmart2
 from ai_greedy import AiGreedy
+from ai_smart_fast import AiSmartFast
+from ai_random import AiRandom
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +16,9 @@ class AIEngine:
     def __init__(self):
         self.ai_types = {
             "smart2": AiSmart2,
-            "greedy": AiGreedy
+            "greedy": AiGreedy,
+            "smart_fast": AiSmartFast,
+            "random": AiRandom
         }
         logger.info("AI Engine initialized with AI types: %s", list(self.ai_types.keys()))
     
@@ -109,30 +113,41 @@ class AIEngine:
             return False
     
     def _is_valid_piece_move(self, piece: Piece, move: Move, board_state: BoardState) -> bool:
-        """Basic piece movement validation."""
+        """Validate piece movement according to variant rules."""
         dx = abs(move.to_posx - move.from_posx)
         dy = abs(move.to_posy - move.from_posy)
         
         if piece.type == PieceType.PAWN:
-            # Pawns move forward one square (or two from starting position)
-            if piece.side == Side.WHITE:
-                if move.to_posy <= move.from_posy:  # Must move forward
+            # Variant pawn rules: no direction, cardinal step or diagonal capture
+            # Two-square first move in cardinal direction
+            if dx == 0 and dy == 2 and not piece.has_moved:
+                # Must be cardinal direction and path clear
+                mid_y = (move.from_posy + move.to_posy) // 2
+                mid_x = move.from_posx
+                if board_state.is_square_occupied(mid_x, mid_y):
                     return False
-                if dx > 0 and not move.killed_piece:  # Can't move sideways without capture
+                if move.killed_piece:
                     return False
-                if dy > 2:  # Can't move more than 2 squares
+                return True
+            elif dx == 2 and dy == 0 and not piece.has_moved:
+                mid_x = (move.from_posx + move.to_posx) // 2
+                mid_y = move.from_posy
+                if board_state.is_square_occupied(mid_x, mid_y):
                     return False
-                if dy == 2 and piece.has_moved:  # Can only move 2 squares from start
+                if move.killed_piece:
                     return False
-            else:  # RED/BLUE sides
-                if move.to_posy >= move.from_posy:  # Must move forward
-                    return False
-                if dx > 0 and not move.killed_piece:  # Can't move sideways without capture
-                    return False
-                if dy > 2:  # Can't move more than 2 squares
-                    return False
-                if dy == 2 and piece.has_moved:  # Can only move 2 squares from start
-                    return False
+                return True
+            elif dx == 1 and dy == 0:
+                # Cardinal step - must not capture
+                return not move.killed_piece
+            elif dx == 0 and dy == 1:
+                # Cardinal step - must not capture
+                return not move.killed_piece
+            elif dx == 1 and dy == 1:
+                # Diagonal - must capture
+                return bool(move.killed_piece)
+            else:
+                return False
         
         elif piece.type == PieceType.KNIGHT:
             # Knights move in L-shape
