@@ -206,7 +206,9 @@ class AiSmartFast(AIBase):
         
         min_distance = float('inf')
         for square in self.upgrade_squares:
-            distance = abs(posx - square['posx']) + abs(posy - square['posy'])
+            sqx = square.posx if hasattr(square, 'posx') else square['posx']
+            sqy = square.posy if hasattr(square, 'posy') else square['posy']
+            distance = abs(posx - sqx) + abs(posy - sqy)
             min_distance = min(min_distance, distance)
         
         return min_distance if min_distance != float('inf') else 0

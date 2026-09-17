@@ -28,17 +28,17 @@ def create_test_board():
             has_moved=False
         ),
         Piece(
-            id="b_pawn_1",
+            id="r_pawn_2",
             type=PieceType.PAWN,
-            side=Side.BLACK,
+            side=Side.RED,
             posx=3,
             posy=1,
             has_moved=False
         ),
         Piece(
-            id="b_king_1",
+            id="r_king_2",
             type=PieceType.KING,
-            side=Side.BLACK,
+            side=Side.RED,
             posx=4,
             posy=0,
             has_moved=False
