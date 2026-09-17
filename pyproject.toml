@@ -1,0 +1,3 @@
+[tool.pytest.ini_options]
+# test_api_server.py needs a running server on localhost:8000; run it by hand.
+addopts = "--ignore=test_api_server.py"
