@@ -40,34 +40,48 @@ def test_minimax_returns_legal_move_on_default_board():
     assert (piece, move) in legal
 
 
+from ai_smart2 import AiSmart2
+
+
 def test_minimax_finds_two_ply_material_win():
-    """Minimax finds a safe capture that requires looking ahead.
+    """Minimax avoids a trap that a one-ply engine falls into.
 
     Position: white rook at (0,0), white king at (7,7).
-    Red king at (2,2) — far enough that it cannot recapture the rook.
-    Red pawn at (0,1) — unprotected, can be captured by the rook.
-    White to move.  The rook should capture the pawn because it is
-    unprotected and yields a material gain.  A one-ply engine might
-    worry about the king, but with 2+ plies minimax sees the king
-    cannot reach the rook in time.
+    Red pawn at (0,1) — apparently free, can be captured by the rook.
+    Red king at (1,2) — far enough that it cannot reach the rook before
+    the capture, but close enough to recapture the rook on the next ply.
+
+    A one-ply engine (smart2) greedily captures the pawn because it looks
+    like free material.  Minimax with depth >= 2 sees the king recapture
+    and avoids the trap, picking a different move.
     """
     pieces = [
         Piece(id="w_king", type=PieceType.KING, side=Side.WHITE, posx=7, posy=7, has_moved=True),
         Piece(id="w_rook", type=PieceType.ROOK, side=Side.WHITE, posx=0, posy=0, has_moved=True),
-        Piece(id="r_king", type=PieceType.KING, side=Side.RED, posx=2, posy=2, has_moved=True),
+        Piece(id="r_king", type=PieceType.KING, side=Side.RED, posx=1, posy=2, has_moved=True),
         Piece(id="r_pawn", type=PieceType.PAWN, side=Side.RED, posx=0, posy=1, has_moved=True),
     ]
     board = make_board(pieces)
-    ai = AiMinimax(board, Side.WHITE, max_depth=3, time_budget_s=0.5)
+
+    # One-ply engine greedily captures the pawn
+    smart2 = AiSmart2(board, Side.WHITE)
+    smart2_move = smart2.select_move()
+    assert smart2_move is not None
+    s_piece, s_move = smart2_move
+    assert s_piece.type == PieceType.ROOK
+    assert s_move["posx"] == 0
+    assert s_move["posy"] == 1
+    assert s_move.get("killed_piece") is not None
+
+    # Minimax sees the recapture and avoids the trap
+    ai = AiMinimax(board, Side.WHITE, max_depth=3, time_budget_s=1.0)
     move_result = ai.select_move()
     assert move_result is not None
     piece, move = move_result
-    # The rook should capture the pawn at (0,1) because it's unprotected
-    # and gives white a material advantage.
-    if piece.type == PieceType.ROOK:
-        assert move["posx"] == 0
-        assert move["posy"] == 1
-        assert move.get("killed_piece") is not None
+    # Minimax must NOT make the rook capture — it loses the rook next turn
+    assert not (piece.type == PieceType.ROOK and move["posx"] == 0 and move["posy"] == 1)
+    # And it must pick a different move than smart2
+    assert (piece.id, move["posx"], move["posy"]) != (s_piece.id, s_move["posx"], s_move["posy"])
 
 
 def test_minimax_respects_time_budget():
