@@ -74,7 +74,8 @@ class AIBase:
         return safe_moves
     
     def _is_move_safe_for_king(self, piece: Piece, move: Dict[str, Any]) -> bool:
-        """Check if a move does not leave the king capturable by opponents."""
+        """Check if a move does not leave the king capturable by opponents.
+        Uses the move generator on the simulated board for a single source of truth."""
         # Find the king
         king = None
         for p in self.board_state.pieces:
@@ -100,91 +101,22 @@ class AIBase:
                     king_posy = p.posy
                     break
         
-        # Check if any opponent piece can capture the king in the simulated state
-        for opponent in sim_state.pieces:
-            if opponent.side == self.side:
-                continue
-            
-            # Check if opponent can move to king position on simulated board
-            if self._can_piece_reach_on_board(opponent, king_posx, king_posy, sim_state):
-                return False
+        # Use the generator on the simulated board to check if any opponent
+        # can reach the king's square. Instantiate AIBase for each opponent side
+        # and check generated moves.
+        opponent_sides = set()
+        for p in sim_state.pieces:
+            if p.side != self.side:
+                opponent_sides.add(p.side)
         
-        return True
-    
-    def _can_piece_reach_on_board(self, piece: Piece, target_x: int, target_y: int, board: BoardState) -> bool:
-        """Check if a piece can move to a specific square in one move on a given board state."""
-        piece_type = piece.type.value if hasattr(piece.type, 'value') else piece.type
-        
-        dx = target_x - piece.posx
-        dy = target_y - piece.posy
-        adx = abs(dx)
-        ady = abs(dy)
-        
-        if piece_type == 'pawn':
-            # Pawn captures diagonally one square
-            if adx == 1 and ady == 1:
-                # Check if target has an enemy piece
-                target_piece = board.get_piece_at(target_x, target_y)
-                return target_piece is not None and target_piece.side != piece.side
-            return False
-        
-        elif piece_type == 'knight':
-            if (adx == 2 and ady == 1) or (adx == 1 and ady == 2):
-                # Cannot land on wall or friendly piece
-                target_piece = board.get_piece_at(target_x, target_y)
-                if target_piece and target_piece.side == piece.side:
-                    return False
-                for w in board.walls:
-                    if w.posx == target_x and w.posy == target_y:
-                        return False
-                return True
-            return False
-        
-        elif piece_type == 'king':
-            if adx <= 1 and ady <= 1:
-                target_piece = board.get_piece_at(target_x, target_y)
-                if target_piece and target_piece.side == piece.side:
-                    return False
-                for w in board.walls:
-                    if w.posx == target_x and w.posy == target_y:
-                        return False
-                return True
-            return False
-        
-        elif piece_type == 'bishop':
-            if adx != ady:
-                return False
-            return self._is_path_clear_on_board(piece.posx, piece.posy, target_x, target_y, board)
-        
-        elif piece_type == 'rook':
-            if adx != 0 and ady != 0:
-                return False
-            return self._is_path_clear_on_board(piece.posx, piece.posy, target_x, target_y, board)
-        
-        elif piece_type == 'queen':
-            if adx != 0 and ady != 0 and adx != ady:
-                return False
-            return self._is_path_clear_on_board(piece.posx, piece.posy, target_x, target_y, board)
-        
-        return False
-    
-    def _is_path_clear_on_board(self, from_x: int, from_y: int, to_x: int, to_y: int, board: BoardState) -> bool:
-        """Check if path between two points is clear on a given board state.
-        Only intermediate squares must be empty; destination is checked separately by caller."""
-        step_x = 1 if to_x > from_x else -1 if to_x < from_x else 0
-        step_y = 1 if to_y > from_y else -1 if to_y < from_y else 0
-        
-        x, y = from_x + step_x, from_y + step_y
-        while x != to_x or y != to_y:
-            if board.is_square_occupied(x, y):
-                return False
-            x += step_x
-            y += step_y
-        
-        # Destination must not be a wall
-        for w in board.walls:
-            if w.posx == to_x and w.posy == to_y:
-                return False
+        for opp_side in opponent_sides:
+            opponent_ai = AIBase(sim_state, opp_side)
+            for opp_piece in sim_state.pieces:
+                if opp_piece.side != self.side:
+                    opp_moves = opponent_ai._calculate_moves_for_piece(opp_piece)
+                    for opp_move in opp_moves:
+                        if opp_move['posx'] == king_posx and opp_move['posy'] == king_posy:
+                            return False
         
         return True
     
@@ -452,10 +384,11 @@ class AIBase:
         """
         return self._calculate_moves_for_piece(piece)
     
-    def _simulate_move(self, piece: Piece, move: Dict[str, Any]) -> BoardState:
+    @staticmethod
+    def _simulate_move_on_board(board_state: BoardState, piece: Piece, move: Dict[str, Any]) -> BoardState:
         """Create a new board state after applying a move."""
         from copy import deepcopy
-        new_state = deepcopy(self.board_state)
+        new_state = deepcopy(board_state)
         
         # Find and move the piece
         for p in new_state.pieces:
@@ -478,6 +411,10 @@ class AIBase:
                     break
         
         return new_state
+    
+    def _simulate_move(self, piece: Piece, move: Dict[str, Any]) -> BoardState:
+        """Create a new board state after applying a move."""
+        return self._simulate_move_on_board(self.board_state, piece, move)
     
     def _value_for_move(self, piece: Piece, move: Dict[str, Any]) -> int:
         """Calculate base material value for a move."""

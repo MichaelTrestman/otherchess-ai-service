@@ -393,3 +393,79 @@ def test_pawn_at_edge_cannot_move_off_board():
     moves = ai._calculate_moves_for_piece(pieces[0])
     coords = {(m["posx"], m["posy"]) for m in moves}
     assert coords == {(0, 1), (1, 0)}
+
+
+# ---------------------------------------------------------------------------
+# Validation bugs (regression tests)
+# ---------------------------------------------------------------------------
+
+def test_validate_move_rejects_rook_onto_wall():
+    """Engine rejects rook moving onto a wall square."""
+    engine = AIEngine()
+    pieces = [
+        Piece(id="wr", type=PieceType.ROOK, side=Side.WHITE, posx=3, posy=3, has_moved=True),
+    ]
+    walls = [Wall(posx=3, posy=5)]
+    board = make_board(pieces, walls=walls)
+    from models import Move
+    move = Move(piece_id="wr", from_posx=3, from_posy=3, to_posx=3, to_posy=5)
+    assert not engine.validate_move(board, move)
+
+
+def test_validate_move_rejects_pawn_two_square_onto_enemy_without_killed_piece():
+    """Engine rejects pawn two-square move onto enemy when request omits killed_piece."""
+    engine = AIEngine()
+    pieces = [
+        Piece(id="wp", type=PieceType.PAWN, side=Side.WHITE, posx=3, posy=3, has_moved=False),
+        Piece(id="rp", type=PieceType.PAWN, side=Side.RED, posx=3, posy=5, has_moved=True),
+    ]
+    board = make_board(pieces)
+    from models import Move
+    move = Move(piece_id="wp", from_posx=3, from_posy=3, to_posx=3, to_posy=5)
+    assert not engine.validate_move(board, move)
+
+
+# ---------------------------------------------------------------------------
+# Random AI legality
+# ---------------------------------------------------------------------------
+
+def test_random_calculates_move_is_legal():
+    """Random AI returns a move that is in the legal move set."""
+    engine = AIEngine()
+    pieces = [
+        Piece(id="w_pawn", type=PieceType.PAWN, side=Side.WHITE, posx=3, posy=6, has_moved=False),
+        Piece(id="w_king", type=PieceType.KING, side=Side.WHITE, posx=4, posy=7, has_moved=False),
+        Piece(id="r_pawn", type=PieceType.PAWN, side=Side.RED, posx=3, posy=1, has_moved=False),
+        Piece(id="r_king", type=PieceType.KING, side=Side.RED, posx=4, posy=0, has_moved=False),
+    ]
+    board = make_board(pieces)
+    result = engine.calculate_move(board, "random", Side.WHITE)
+    assert result is not None
+    assert result["move"] is not None
+    # Verify the returned move is in the legal set
+    ai = AIBase(board, Side.WHITE)
+    legal_moves = ai._assemble_possible_moves()
+    legal_coords = {(p.id, m["posx"], m["posy"]) for p, m in legal_moves}
+    returned = result["move"]
+    assert (returned.piece_id, returned.to_posx, returned.to_posy) in legal_coords
+
+
+# ---------------------------------------------------------------------------
+# Promotion through calculate_move / Move model
+# ---------------------------------------------------------------------------
+
+def test_promotion_through_calculate_move():
+    """Promotion is returned through calculate_move into the Move model."""
+    engine = AIEngine()
+    pieces = [
+        Piece(id="wp", type=PieceType.PAWN, side=Side.WHITE, posx=3, posy=1, has_moved=True),
+        Piece(id="w_king", type=PieceType.KING, side=Side.WHITE, posx=4, posy=7, has_moved=False),
+        Piece(id="r_king", type=PieceType.KING, side=Side.RED, posx=0, posy=0, has_moved=False),
+    ]
+    upgrade_squares = [UpgradeSquare(posx=3, posy=0)]
+    board = make_board(pieces, upgrade_squares=upgrade_squares)
+    result = engine.calculate_move(board, "greedy", Side.WHITE)
+    assert result is not None
+    assert result["move"] is not None
+    # The greedy AI should pick the promotion move (queen is high value)
+    assert result["move"].promotion_type == PieceType.QUEEN

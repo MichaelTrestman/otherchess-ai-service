@@ -84,7 +84,7 @@ class AIEngine:
     def validate_move(self, board_state: BoardState, move: Move) -> bool:
         """
         Validate if a move is legal for the given board state.
-        This is a basic validation - more complex chess rules would need to be implemented.
+        Delegates to the move generator for a single source of truth.
         """
         try:
             # Check if piece exists
@@ -102,98 +102,26 @@ class AIEngine:
             if dest_piece and dest_piece.side == piece.side:
                 return False
             
-            # Basic piece movement validation (simplified)
-            if not self._is_valid_piece_move(piece, move, board_state):
-                return False
+            # Delegate to the move generator for the single source of truth
+            from ai_base import AIBase
+            ai = AIBase(board_state, piece.side)
+            generated_moves = ai._calculate_moves_for_piece(piece)
             
-            return True
+            for gen_move in generated_moves:
+                if (gen_move['posx'] == move.to_posx and gen_move['posy'] == move.to_posy):
+                    # Match destination; also verify killed_piece matches board reality
+                    if move.killed_piece:
+                        if not gen_move.get('killed_piece'):
+                            return False
+                        if gen_move['killed_piece']['id'] != move.killed_piece['id']:
+                            return False
+                    else:
+                        if gen_move.get('killed_piece'):
+                            return False
+                    return True
+            
+            return False
             
         except Exception as e:
             logger.error(f"Error validating move: {str(e)}")
             return False
-    
-    def _is_valid_piece_move(self, piece: Piece, move: Move, board_state: BoardState) -> bool:
-        """Validate piece movement according to variant rules."""
-        dx = abs(move.to_posx - move.from_posx)
-        dy = abs(move.to_posy - move.from_posy)
-        
-        if piece.type == PieceType.PAWN:
-            # Variant pawn rules: no direction, cardinal step or diagonal capture
-            # Two-square first move in cardinal direction
-            if dx == 0 and dy == 2 and not piece.has_moved:
-                # Must be cardinal direction and path clear
-                mid_y = (move.from_posy + move.to_posy) // 2
-                mid_x = move.from_posx
-                if board_state.is_square_occupied(mid_x, mid_y):
-                    return False
-                if move.killed_piece:
-                    return False
-                return True
-            elif dx == 2 and dy == 0 and not piece.has_moved:
-                mid_x = (move.from_posx + move.to_posx) // 2
-                mid_y = move.from_posy
-                if board_state.is_square_occupied(mid_x, mid_y):
-                    return False
-                if move.killed_piece:
-                    return False
-                return True
-            elif dx == 1 and dy == 0:
-                # Cardinal step - must not capture
-                return not move.killed_piece
-            elif dx == 0 and dy == 1:
-                # Cardinal step - must not capture
-                return not move.killed_piece
-            elif dx == 1 and dy == 1:
-                # Diagonal - must capture
-                return bool(move.killed_piece)
-            else:
-                return False
-        
-        elif piece.type == PieceType.KNIGHT:
-            # Knights move in L-shape
-            return (dx == 2 and dy == 1) or (dx == 1 and dy == 2)
-        
-        elif piece.type == PieceType.BISHOP:
-            # Bishops move diagonally
-            if dx != dy:
-                return False
-            # Check if path is blocked
-            return not self._is_path_blocked(move.from_posx, move.from_posy, 
-                                           move.to_posx, move.to_posy, board_state)
-        
-        elif piece.type == PieceType.ROOK:
-            # Rooks move horizontally or vertically
-            if dx != 0 and dy != 0:
-                return False
-            # Check if path is blocked
-            return not self._is_path_blocked(move.from_posx, move.from_posy, 
-                                           move.to_posx, move.to_posy, board_state)
-        
-        elif piece.type == PieceType.QUEEN:
-            # Queens move like rooks or bishops
-            if dx != 0 and dy != 0 and dx != dy:
-                return False
-            # Check if path is blocked
-            return not self._is_path_blocked(move.from_posx, move.from_posy, 
-                                           move.to_posx, move.to_posy, board_state)
-        
-        elif piece.type == PieceType.KING:
-            # Kings move one square in any direction
-            return dx <= 1 and dy <= 1
-        
-        return True
-    
-    def _is_path_blocked(self, from_x: int, from_y: int, to_x: int, to_y: int, 
-                         board_state: BoardState) -> bool:
-        """Check if path between two points is blocked."""
-        dx = 1 if to_x > from_x else -1 if to_x < from_x else 0
-        dy = 1 if to_y > from_y else -1 if to_y < from_y else 0
-        
-        x, y = from_x + dx, from_y + dy
-        while x != to_x or y != to_y:
-            if board_state.is_square_occupied(x, y):
-                return True
-            x += dx
-            y += dy
-        
-        return False

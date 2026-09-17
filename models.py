@@ -142,7 +142,9 @@ class MoveRequest(BaseModel):
     
     @validator('ai_type')
     def validate_ai_type(cls, v):
-        valid_types = ["smart2", "greedy", "smart_fast", "random"]
+        from ai_engine import AIEngine
+        engine = AIEngine()
+        valid_types = engine.get_available_ai_types()
         if v not in valid_types:
             raise ValueError(f'AI type must be one of: {valid_types}')
         return v
