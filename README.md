@@ -29,7 +29,7 @@ What works and what does not, measured against [RULES.md](RULES.md).
 | `smart2` | One ply heuristic evaluation. Works but shallow. Default. |
 | `smart_fast` | One ply with threat maps. Registered. |
 | `random` | Uniform choice among legal moves. Registered. |
-| Search | No lookahead of any depth. This is the open goal. |
+| Search | Variable-depth minimax with alpha-beta pruning and time budget (`ai_minimax.py`). |
 | Tests | `pytest` on a clean checkout: 38 passed. `test_variant_rules.py` covers every rule above; `test_main.py` covers the HTTP endpoints with FastAPI's TestClient. |
 
 ## Layout
@@ -43,6 +43,7 @@ ai_greedy.py        AiGreedy
 ai_smart2.py        AiSmart2 (default)
 ai_smart_fast.py    AiSmartFast
 ai_random.py        AiRandom
+ai_minimax.py       AiMinimax (variable-depth minimax with alpha-beta pruning)
 test_ai.py          engine and board validation tests
 test_variant_rules.py  rule by rule coverage of RULES.md, validate_move, AI registration
 test_main.py        HTTP endpoints via TestClient

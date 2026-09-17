@@ -15,20 +15,12 @@ class AiMinimax(AIBase):
     intact.
     """
 
-    # ------------------------------------------------------------------
-    # Piece values used by the static evaluator
-    # ------------------------------------------------------------------
-    PIECE_VALUES = {
-        PieceType.PAWN:   100,
-        PieceType.KNIGHT: 320,
-        PieceType.BISHOP: 330,
-        PieceType.ROOK:   500,
-        PieceType.QUEEN:  900,
-        PieceType.KING:  20000,
-    }
+    # Large finite mate score, scaled by depth so faster wins score higher.
+    MATE_SCORE = 1_000_000
 
     # How far the engine may search when no time budget is given.
-    DEFAULT_MAX_DEPTH = 3
+    # The time budget is the primary limit; the depth cap is a safety rail.
+    DEFAULT_MAX_DEPTH = 20
 
     # Time budget in seconds (None => no limit).
     DEFAULT_TIME_BUDGET_S = 2.0
@@ -59,7 +51,7 @@ class AiMinimax(AIBase):
             return None
 
         # Start the clock.
-        self._cutoff_time = time.time() + self.time_budget_s
+        self._cutoff_time = time.monotonic() + self.time_budget_s
 
         best_move: Optional[Tuple[Piece, Dict[str, Any]]] = None
         best_score = -float("inf")
@@ -86,7 +78,6 @@ class AiMinimax(AIBase):
                     depth - 1,
                     alpha,
                     beta,
-                    maximizing=False,          # opponent to move
                     current_depth=1,
                 )
 
@@ -113,7 +104,8 @@ class AiMinimax(AIBase):
 
     def get_move_score(self, move_result: Tuple[Piece, Dict[str, Any]]) -> int:
         """Score of the *current* move result (called by AIEngine)."""
-        return getattr(self, "_best_score", 0)
+        score = getattr(self, "_best_score", 0)
+        return int(max(min(score, self.MATE_SCORE), -self.MATE_SCORE))
 
     # ------------------------------------------------------------------
     # Minimax core
@@ -125,7 +117,6 @@ class AiMinimax(AIBase):
         depth: int,
         alpha: float,
         beta: float,
-        maximizing: bool,
         current_depth: int,
     ) -> float:
         """Recursive minimax with alpha-beta pruning."""
@@ -134,18 +125,27 @@ class AiMinimax(AIBase):
         if self._out_of_time():
             return self._evaluate_board(board_state)
 
-        side_to_move = self._side_to_move_at_depth(current_depth)
+        side_to_move = self._side_to_move_at_depth(current_depth, board_state)
+        maximizing = side_to_move == self.root_side
 
-        # Terminal checks
-        terminal_score = self._terminal_score(board_state, side_to_move)
-        if terminal_score is not None:
-            return terminal_score
+        # Terminal: root king gone = losing (score scaled by depth)
+        if self._find_king(board_state, self.root_side) is None:
+            return -(self.MATE_SCORE - current_depth)
+
+        # Terminal: all opponent kings gone = winning (score scaled by depth)
+        if not any(p.side != self.root_side and p.type == PieceType.KING for p in board_state.pieces):
+            return self.MATE_SCORE - current_depth
+
+        # Generate legal moves once for this node
+        legal = self._all_legal_moves_for_side(board_state, side_to_move)
+
+        # Stalemate: side to move has no legal moves
+        if not legal:
+            return 0.0
 
         # Leaf – static evaluation
         if depth <= 0:
             return self._evaluate_board(board_state)
-
-        legal = self._all_legal_moves_for_side(board_state, side_to_move)
 
         if maximizing:
             value = -float("inf")
@@ -156,7 +156,6 @@ class AiMinimax(AIBase):
                     depth - 1,
                     alpha,
                     beta,
-                    maximizing=False,
                     current_depth=current_depth + 1,
                 )
                 value = max(value, score)
@@ -173,7 +172,6 @@ class AiMinimax(AIBase):
                     depth - 1,
                     alpha,
                     beta,
-                    maximizing=True,
                     current_depth=current_depth + 1,
                 )
                 value = min(value, score)
@@ -186,46 +184,11 @@ class AiMinimax(AIBase):
     # Terminal / leaf evaluation helpers
     # ------------------------------------------------------------------
 
-    def _terminal_score(
-        self, board_state: BoardState, side_to_move: Side
-    ) -> Optional[float]:
-        """
-        Detect terminal positions.
-        Returns None if the game is not over.
-        """
-        # 1. King capture => side with no king is out.
-        #    If the root side has no king, that's the worst outcome.
-        #    If an opponent has no king, that's great for the root.
-        root_king = self._find_king(board_state, self.root_side)
-
-        if root_king is None:
-            # Root side has been eliminated -> worst possible score
-            return -float("inf")
-
-        # Collect opponent kings
-        opponent_kings = [
-            p for p in board_state.pieces
-            if p.side != self.root_side and p.type == PieceType.KING
-        ]
-
-        if not opponent_kings:
-            # No opponents have kings -> root wins -> best possible score
-            return float("inf")
-
-        # 2. Stalemate: side to move has no legal moves.
-        legal = self._all_legal_moves_for_side(board_state, side_to_move)
-        if not legal:
-            # In a multi-player game a stalemate for the player to move
-            # is neutral from the root perspective (they don't get to
-            # improve their position this turn).  Return 0.
-            return 0.0
-
-        return None
-
     def _evaluate_board(self, board_state: BoardState) -> float:
         """
         Static evaluation from the root side's perspective.
         Positive = good for root, negative = bad for root.
+        Uses AIBase material scoring for consistency.
         """
         score = 0.0
 
@@ -233,7 +196,8 @@ class AiMinimax(AIBase):
         opp_material = 0
 
         for piece in board_state.pieces:
-            value = self.PIECE_VALUES.get(piece.type, 100)
+            piece_type = piece.type.value if hasattr(piece.type, 'value') else piece.type
+            value = self.piece_values.get(piece_type, 100)
             if piece.side == self.root_side:
                 root_material += value
             else:
@@ -285,18 +249,16 @@ class AiMinimax(AIBase):
         ai = AIBase(board_state, side)
         return ai._assemble_possible_moves()
 
-    def _side_to_move_at_depth(self, depth: int) -> Side:
+    def _side_to_move_at_depth(self, depth: int, board_state: BoardState) -> Side:
         """
         Determine which side moves at ply *depth*.
         The move order is the fixed cycle white -> red -> blue.
         Depth 0 = root side's turn, depth 1 = next side, etc.
+        Reads *board_state* so sides eliminated mid-search are dropped.
         """
         cycle = [Side.WHITE, Side.RED, Side.BLUE]
         # Build the list of *actually present* sides in cycle order
-        present_sides = []
-        for s in cycle:
-            if any(p.side == s for p in self.board_state.pieces):
-                present_sides.append(s)
+        present_sides = [s for s in cycle if any(p.side == s for p in board_state.pieces)]
 
         if not present_sides:
             return self.root_side
@@ -335,4 +297,4 @@ class AiMinimax(AIBase):
     def _out_of_time(self) -> bool:
         if self._cutoff_time is None:
             return False
-        return time.time() >= self._cutoff_time
+        return time.monotonic() >= self._cutoff_time
