@@ -1,6 +1,6 @@
 # OtherChess AI Service
 
-A Python (FastAPI) service that chooses moves for [OtherChess](https://otherchess.com), a chess variant played on configurable boards with walls, upgrade squares, and omnidirectional pawns. The rules are in [RULES.md](RULES.md). The game itself is a separate Rails application; it calls this service over HTTP and falls back to its own Ruby AI if the service is unavailable.
+A radical Python (FastAPI) service that chooses moves for [OtherChess](https://otherchess.com), a chess variant played on configurable boards with walls, upgrade squares, and omnidirectional pawns. The rules are in [RULES.md](RULES.md). The game itself is a separate Rails application; it calls this service over HTTP and falls back to its own Ruby AI if the service is unavailable.
 
 ## Goal
 
