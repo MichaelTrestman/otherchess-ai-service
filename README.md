@@ -1,187 +1,119 @@
-# Expansion Chess AI API
+# OtherChess AI Service
 
-A Python (FastAPI) service that calculates AI moves for Expansion Chess, a three-sided chess variant with walls and upgrade squares.
+A Python (FastAPI) service that chooses moves for [OtherChess](https://otherchess.com), a chess variant played on configurable boards with walls, upgrade squares, and omnidirectional pawns. The rules are in [RULES.md](RULES.md). The game itself is a separate Rails application; it calls this service over HTTP and falls back to its own Ruby AI if the service is unavailable.
 
-## Features
+## Goal
 
-- **Fast AI**: Python-based implementation that's significantly faster than Ruby
-- **Multiple AI Types**: Support for smart2 (intelligent) and greedy (material-focused) AI
-- **REST API**: Simple HTTP interface for integration
-- **Validation**: Comprehensive board state and move validation
-- **Extensible**: Easy to add new AI types
+A correct move generator for the variant rules, and on top of it a basic, functional, variable depth minimax (alpha beta) player with a time budget. The current code does not reach that goal: it is a one ply evaluator ported from the Ruby AI, the move generator is missing several variant rules, and the tests do not agree with the rules. See [Status](#status).
 
-## Setup
+## Quickstart
 
-### Prerequisites
-
-- Python 3.8+
-- pip
-
-### Installation
-
-1. Install dependencies:
 ```bash
-pip install -r requirements.txt
+make setup     # pip install -r requirements.txt -r requirements-dev.txt
+make test      # pytest
+make run       # python main.py, serves on http://localhost:8000
 ```
 
-2. Run the API server:
-```bash
-python main.py
+Python 3.10 or newer. No environment variables, no database, no external services.
+
+## Status
+
+What works and what does not, measured against [RULES.md](RULES.md).
+
+| Area | State |
+| --- | --- |
+| Board model (`models.py`) | Pieces, walls, upgrade squares, bounds and duplicate checks. Uses Pydantic v1 style validators, which warn under Pydantic 2. |
+| Move generation (`ai_base.py`) | Pawn single step in four cardinal directions and diagonal capture; sliding pieces stopped by walls; knight; king single step. Missing: pawn two square first move, promotion on upgrade squares, castling. |
+| Move validation (`AIEngine.validate_move`) | Implements standard chess pawn rules, which contradict the variant. Not exposed by any endpoint. |
+| `greedy` | Picks the highest material capture. Works. |
+| `smart2` | One ply heuristic evaluation. Works but shallow. |
+| `smart_fast` | Exists with its own tests but is not registered with the engine or accepted by the API. |
+| `random` | `ai_random.py` is empty. |
+| Search | No lookahead of any depth. |
+| Tests | `pytest` on a clean checkout: 2 failed, 2 passed. The failures reference a side (`BLACK`) that does not exist. Coverage of the variant rules is thin. |
+
+## Layout
+
+```
+main.py             FastAPI app: /health, /api/v1/ai/types, /api/v1/ai/move
+models.py           Pydantic models: BoardState, Piece, Wall, UpgradeSquare, Move, MoveRequest, MoveResponse
+ai_engine.py        AIEngine: routes ai_type to an AI class, converts results, validate_move
+ai_base.py          AIBase: occupancy registry, move generation per piece type, material scoring
+ai_greedy.py        AiGreedy
+ai_smart2.py        AiSmart2 (default)
+ai_smart_fast.py    AiSmartFast (not registered)
+ai_random.py        empty
+test_ai.py          engine and board validation tests
+test_smart_fast.py  AiSmartFast tests (currently failing)
+test_api_server.py  integration check against a running server; excluded from pytest
+RULES.md            the variant rules this service must implement
 ```
 
-The API will be available at `http://localhost:8000`
+Modules import each other by bare name (`from models import ...`), so run everything from the repo root.
 
-## API Endpoints
+## Working on this repo
 
-### Health Check
-```
-GET /health
-```
-Returns API status and health information.
+- Test command: `pytest` from the repo root. `test_api_server.py` needs a live server; run it by hand with `python main.py` in another terminal, then `python test_api_server.py`.
+- Add tests next to the code they cover, as `test_*.py` files with `test_*` functions. Fixtures that build boards belong in `conftest.py` once one exists.
+- The rules in `RULES.md` are authoritative. When code, tests, and RULES.md disagree, RULES.md wins; if RULES.md is wrong, fix RULES.md in the same change and say so.
+- The HTTP API shape (request and response models in `models.py`, the three endpoints) is consumed by the Rails app and must not change without a version bump.
+- Keep dependencies to standard, pip installable packages. There is no lockfile yet.
 
-### Get AI Types
-```
-GET /api/v1/ai/types
-```
-Returns available AI types and default recommendation.
+## API
 
-### Calculate AI Move
-```
-POST /api/v1/ai/move
+### `GET /health`
+
+Returns `{"status": "healthy", "ai_engine": "ready"}`.
+
+### `GET /api/v1/ai/types`
+
+Returns the registered AI types and the default:
+
+```json
+{ "ai_types": ["smart2", "greedy"], "default": "smart2" }
 ```
 
-**Request Body:**
+### `POST /api/v1/ai/move`
+
+Request:
+
 ```json
 {
   "board_state": {
     "width": 8,
     "height": 8,
     "pieces": [
-      {
-        "id": "w_pawn_1",
-        "type": "pawn",
-        "side": "white",
-        "posx": 0,
-        "posy": 1,
-        "has_moved": false
-      }
+      { "id": "r_pawn_1", "type": "pawn", "side": "red", "posx": 0, "posy": 1, "has_moved": false }
     ],
-    "walls": [
-      {
-        "posx": 3,
-        "posy": 3
-      }
-    ],
-    "upgrade_squares": [
-      {
-        "posx": 0,
-        "posy": 0
-      }
-    ]
+    "walls": [ { "posx": 3, "posy": 3 } ],
+    "upgrade_squares": [ { "posx": 0, "posy": 0 } ]
   },
   "ai_type": "smart2",
-  "side": "white",
-  "game_id": "optional_game_id"
+  "side": "red",
+  "game_id": "optional"
 }
 ```
 
-**Response:**
+Response:
+
 ```json
 {
   "move": {
-    "piece_id": "w_pawn_1",
-    "from_posx": 0,
-    "from_posy": 1,
-    "to_posx": 0,
-    "to_posy": 2,
+    "piece_id": "r_pawn_1",
+    "from_posx": 0, "from_posy": 1,
+    "to_posx": 0, "to_posy": 2,
     "killed_piece": null,
     "promotion_type": null
   },
   "score": 150,
   "thinking_time_ms": 45,
   "ai_type": "smart2",
-  "side": "white"
+  "side": "red"
 }
 ```
 
-## AI Types
-
-### Smart2 (Default)
-- **Strategy**: Intelligent evaluation considering piece type, position, protection, and advancement
-- **Best for**: Competitive play, strategic thinking
-- **Performance**: Fast with good move quality
-
-### Greedy
-- **Strategy**: Always chooses the highest material value move
-- **Best for**: Testing, simple scenarios
-- **Performance**: Very fast, predictable
-
-## Testing
-
-Install the dev dependencies and run the unit tests:
-
-```bash
-pip install -r requirements-dev.txt
-pytest
-```
-
-This covers board validation, AI move generation, move validation, and the AiSmartFast agent. The test files can also be run directly as scripts (`python test_ai.py`).
-
-`test_api_server.py` is an integration check against a running server and is excluded from `pytest` by default. Start the server with `python main.py`, then run `python test_api_server.py`.
-
-## Integration with Rails
-
-The API is designed to be easily integrated with your Rails application:
-
-1. **Replace Ruby AI calls** with HTTP requests to this API
-2. **Add fallback logic** to use Ruby AI if the API is unavailable
-3. **Monitor performance** and reliability
-
-## Performance
-
-- **Move calculation**: < 100ms for most positions
-- **API response**: < 50ms including network latency
-- **Concurrent requests**: Handles 10+ simultaneous calculations
-
-## Development
-
-### Adding New AI Types
-
-1. Create a new AI class inheriting from `AIBase`
-2. Implement the `select_move()` method
-3. Add the AI type to `AIEngine.ai_types`
-4. Update validation in `models.py`
-
-### Project Structure
-
-```
-./
-├── main.py          # FastAPI application
-├── models.py        # Pydantic models and validation
-├── ai_engine.py     # Main AI engine and routing
-├── ai_base.py       # Base AI class with common functionality
-├── ai_smart2.py     # Smart AI implementation
-├── ai_greedy.py     # Greedy AI implementation
-├── test_ai.py       # Test suite
-├── requirements.txt # Python dependencies
-└── README.md        # This file
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Import errors**: Make sure all dependencies are installed
-2. **Validation errors**: Check board state format and piece positions
-3. **No moves found**: Verify the board has valid pieces for the requested side
-
-### Logs
-
-The API provides detailed logging for debugging:
-- AI calculation steps
-- Move validation results
-- Error details and stack traces
+`400` for an invalid board state (out of bounds or overlapping pieces), `422` for a request that fails model validation (unknown `ai_type`, negative coordinates), `500` if the AI finds no move.
 
 ## Origin
 
-This service was extracted from the Expansion Chess Reborn monorepo. The Rails application reaches it over HTTP via `AI_API_URL` (see `app/services/ai_api_service.rb` there).
+Extracted from the Expansion Chess Reborn monorepo, where it lived as `ai_api/`. The Rails side reaches it through `AI_API_URL` (default `http://ai-api:8000` in Docker, `http://localhost:8000` otherwise) with a Ruby fallback when the service is down.
